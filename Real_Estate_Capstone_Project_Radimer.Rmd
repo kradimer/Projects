@@ -1,0 +1,374 @@
+---
+title: "Predictive Model of Selling Price For Homes in Ames, Iowa"
+author: "Kelly Radimer"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Background
+
+For this project, I play the role of a statistical consultant working for a real estate investment firm, tasked with developing a model to predict the selling price of a given home in Ames, Iowa, so as to identify homes that would be good investments for the firm.
+
+# Training Data and relevant packages
+
+The data were randomly divided into three separate pieces: a training data set, a testing data set, and a validation data set, to allow me to better assess the model produced. First, I created a model using the training data set.
+
+```{r load, message = FALSE}
+load("ames_train.Rdata")
+```
+
+Load the necessary packages:
+
+```{r packages, message=FALSE, warning=FALSE}
+library(statsr)
+library(dplyr)
+library(BAS)
+library(MASS)
+library(devtools)
+library(ggplot2)
+```
+
+## Part 1 - Exploratory Data Analysis (EDA)
+
+Home prices and home areas tend to be right skewed, so our models will probably perform better if we take the log of those fields.
+
+```{r fig.width=4, fig.height=3}
+ggplot(data=ames_train, aes(x=price))+geom_histogram(bins = 30)+
+    ggtitle("Histogram of Home Prices")
+ggplot(data=ames_train, aes(x=log(price)))+geom_histogram(bins = 30)+
+    ggtitle("Histogram of Log Transformed Home Prices")
+```
+
+
+Past analysis has suggested that houses sold under abnormal and partial conditions may not be useful in building our models.  Let's have a look at how these homes compare to those sold under other conditions.
+
+```{r}
+qplot(log(area), log(price), data = ames_train, colour=Sale.Condition)+
+    ggtitle("Log Price vs. Log Area")
+```
+
+```{r}
+ames_train%>%filter(Sale.Condition=="Abnorml")%>%summarise(mean=mean(price), sd=sd(price), count=n())
+ames_train%>%filter(Sale.Condition=="Partial")%>%summarise(mean=mean(price), sd=sd(price), count=n())
+ames_train%>%filter(Sale.Condition!="Abnorml")%>%filter(Sale.Condition!="Partial")%>%summarise(mean=mean(price), sd=sd(price), count=n())
+```
+
+
+Homes with sale condition "Abnorml" tended to sell for less than homes of similar area with other sale conditions.  Those with sale condition "Partial" tended to sell for more than homes with similar area sold under Normal conditions.  The code book explains that Partial means "Home was not completed when last assessed (associated with New Homes)."  Abnormal sales include "trade, foreclosure, short sale." Though the investment firm might purchase foreclosures and short sales, what they're really interested in is the resale value of these homes, which would be better represented by homes with normal sale conditions, so we will remove the 61 Abnormal and 82 Partial sales from the data set.
+
+```{r}
+ames_train<-ames_train%>%filter(Sale.Condition!="Abnorml")%>%filter(Sale.Condition!="Partial")
+```
+
+
+Next we will look at scatterplots of variables that from past experience we believe are good single predictors of price: year built, year of remodel, bedrooms above ground, log(lot area), and overall quality.  Our scatterplot above has already shown us that log(area) is also a good predictor.  
+
+```{r}
+ggplot(data=ames_train, aes(x=Year.Built, y=log(price)))+geom_point()
+ggplot(data=ames_train, aes(x=Year.Remod.Add, y=log(price)))+geom_point()
+ggplot(data=ames_train, aes(x=Bedroom.AbvGr, y=log(price)))+geom_point()
+ggplot(data=ames_train, aes(x=log(Lot.Area), y=log(price)))+geom_point()
+ggplot(data=ames_train, aes(x=Overall.Qual, y=log(price)))+geom_point()
+```
+
+All of these variables do appear to have at least moderately strong correlation with price.
+
+
+
+## Part 2 - Development and assessment of an initial model, following a semi-guided process of analysis
+
+### Section 2.1 An Initial Model
+
+For our initial model we will begin with the quantitative variables that we identified as being good single predictors in our EDA above: year built, year of remodel, bedrooms above ground, log(lot area), overall quality, and log(area).  It is reasonable to believe that houses that were more recently built, more recently remodeled, having more bedrooms, having a bigger lot, having a larger area and being of higher quality will be worth more.  Additionally, we will consider lot slope, exterior Quality, Central Cooling and kitchen quality, as people may be concerned with the slope of the land their house is on, the quality of the home's exterior, whether the house has central AC and how nice the kitchen is.  
+
+```{r fit_model}
+model_full=lm(log(price)~Year.Built+Year.Remod.Add+log(area)+Bedroom.AbvGr+log(Lot.Area)+Overall.Qual+Kitchen.Qual+Land.Slope+Exter.Qual+Central.Air, data=ames_train)
+summary(model_full)
+```
+
+This model appears to be a good starting place.  All predictors are statistically significant in at least one category.
+
+* * *
+
+### Section 2.2 Model Selection
+
+We will begin by trying out AIC model selection to see if there are any predictors that we can eliminate.
+
+```{r model_select}
+model_AIC=stepAIC(model_full, direction = "backward", k = 2, trace = TRUE)
+summary(model_AIC)
+```
+
+Stepwise AIC did not eliminate any of our variables.  Let's try BIC.
+
+```{r}
+model_BIC=stepAIC(model_full, direction = "backward", k = log(857), trace = TRUE)
+summary(model_BIC)
+```
+
+BIC model selection eliminated Exterior Quality and Land Slope.  The results of the two model selection methods were not consistent.  BIC placed more emphasis on obtaining a parsimonious model, whereas AIC placed greater value on having the best possible predictions.  Our Adjusted R-squared was 0.8701 with the additional two predictors and 0.8677 without them.  If we can simplify our model by 2 predictors and only lose 0.0024 in our Adjusted R-squared, that's probably worth it, so we will use the BIC model.
+
+* * *
+
+### Section 2.3 Initial Model Residuals
+
+To assess the performance of our BIC model, let's have a look at the residual plot.
+
+```{r model_resid}
+ggplot(model_BIC, aes(x=.fitted, y=.resid))+geom_point()+geom_hline(yintercept = 0, linetype="dashed")
+```
+
+The model is, overall, a good fit for the data, as there is no clear form to the residual plot.  The variance appears to be approximately equal across the spectrum for all fitted values, so we don't need to be worried about our predictions for especially high or low priced homes to be more or less accurate than other homes.  There are three points with unusually low residuals, meaning that our model dramatically overestimated the price of these three homes.  If we notice a similar phenomena in the test data, we may want to figure out what characteristics these homes have in common so that the investment firm can avoid overpaying for such homes.
+
+* * *
+
+### Section 2.4 Initial Model RMSE
+
+
+How far off do our predictions of home price tend to be?  To answer this we can calculate the root mean square error.
+
+
+```{r model_rmse}
+predict_BIC<-exp(predict(model_BIC, ames_train))
+resid_BIC<-ames_train$price - predict_BIC
+rmse_BIC<-sqrt(mean(resid_BIC^2))
+rmse_BIC
+```
+
+On average, our predictions of home prices are off by $25,862.69.
+
+* * *
+
+### Section 2.5 Overfitting 
+
+To avoid using a model that is overly-tuned to specifically fit the training data, we will check the performance of our model on out-of-sample data. 
+
+```{r loadtest, message = FALSE}
+load("ames_test.Rdata")
+```
+
+As we did with our training data, we will filter out any partial or abnormal sales from the test data.
+
+```{r initmodel_test}
+ames_test<-ames_test%>%filter(Sale.Condition!="Abnorml")%>%filter(Sale.Condition!="Partial")
+```
+
+The number of observations in the set of test data didn't change when we filtered out abnormal and partial sales, so it would appear that there weren't any partial or abnormal sales in the test data.  Now let's see how accurate our predictions are when applying our training model to the test data.
+
+```{r}
+predict_test<-exp(predict(model_BIC, ames_test))
+resid_test<-ames_test$price - predict_test
+rmse_test<-sqrt(mean(resid_test^2))
+rmse_test
+```
+
+For the test data, our predictions are off by an average of $26,757.99, which is a little more than our predictions were off for the training data, but not a huge amount.  Let's check out a residual plot.
+
+
+```{r}
+df=data.frame(predict_test, resid_test)
+ggplot(df, aes(x=predict_test, y=resid_test))+geom_point()+geom_hline(yintercept = 0, linetype="dotted")
+```
+
+The model performs pretty well on homes where our predictions of price ranged from 0 to 450,000 dollars, but for the highest predicted prices, our model performs poorly, with increasingly large residuals for the three highest estimated priced homes.  In all three of these cases our predictions were too low, in one case by over $200,000.  These three homes were ID numbers 640, 326, and 8.  Let's see if these homes have anything in particular in common to see if there is another variable that we should be taking into account in our final model.
+
+```{r}
+test_outliers<-ames_test[c(8, 326, 640), 1:81]
+```
+
+All of these homes have three-car garages, at least one fireplace, an open porch and a wood deck, so we should see whether these would be significant variables to include in our model. Also, they all seem to have a lot of bathrooms, so let's include those as well.
+
+## Part 3 Development of a Final Model
+
+### Section 3.1 Final Model
+
+In order to choose the best possible coefficients for our predictors, let's combine the test and training data together into a single dataset so that we are using all available data to create our model.
+
+```{r model_playground}
+ames_combo<-rbind(ames_test, ames_train)
+```
+
+Let's add a new variable that will give the total number of bathrooms, multiplying the number of half baths by 0.5.
+
+```{r}
+ames_combo <- ames_combo %>% 
+  mutate(Total.Baths=ames_combo$Full.Bath+.5*ames_combo$Half.Bath)
+```
+
+Additionally, there is one home in the data set with no garage, which is giving us a value of NA for Garage.Cars.
+
+```{r}
+summary(ames_combo$Garage.Cars)
+```
+
+Since there is no garage, this home has garage capacity for 0 cars, so I will code this as a 0 car garage.
+
+```{r}
+ames_combo$Garage.Cars[which(is.na(ames_combo$Garage.Cars))]<-0
+summary(ames_combo$Garage.Cars)
+```
+
+As discussed below, I am also going to include an interaction variable between the number of bedrooms and the area of the home.
+We'll start by centering the variables.
+
+```{r model_inter}
+ames_combo<-ames_combo%>%mutate(BedsC=ames_combo$Bedroom.AbvGr - mean(ames_combo$Bedroom.AbvGr), areaC=ames_combo$area-mean(ames_combo$area))
+```
+
+Next we'll multiply the centered variables for bedrooms and area.
+
+```{r}
+ames_combo<-ames_combo%>%mutate(Beds.Area=ames_combo$BedsC * ames_combo$areaC)
+```
+
+Now we'll craft our final model.  Discussion of the means by which we arrived at this model can be found in the sections below.
+
+```{r}
+combo_interact=lm(log(price)~Year.Built+Year.Remod.Add+log(area)+Bedroom.AbvGr+log(Lot.Area)+Overall.Qual+Kitchen.Qual+Central.Air+Total.Baths+Fireplaces+Garage.Cars+Wood.Deck.SF+Beds.Area, data=ames_combo)
+summary(combo_interact)
+```
+
+
+### Section 3.2 Transformation
+
+
+I transformed price, area and lot area, because all three of these distributions were skewed.  Additionally, the variables had a stronger linear association when transformed.
+
+```{r model_assess}
+ggplot(ames_combo, aes(x=log(price), y=log(area)))+geom_point()
+ggplot(ames_combo, aes(x=log(price), y=area))+geom_point()
+ggplot(ames_combo, aes(x=log(price), y=log(Lot.Area)))+geom_point()
+ggplot(ames_combo, aes(x=log(price), y=Lot.Area))+geom_point()
+```
+
+
+### Section 3.3 Variable Interaction
+
+One of the capstone quizzes suggested that number of bedrooms has a positive association with the price of the house, except that all other things being held equal, larger houses with fewer bedrooms sold for more than larger houses with more bedrooms, so this appeared to be an important variable interaction.  I created my interaction variable as described above, and found that it was included by both BIC and AIC model selection.
+
+
+### Section 3.4 Variable Selection
+
+
+I used backward elimination BIC to select my variables for the final method.  I used BIC because I think it is good to create a parsimonious model to avoid overfitting.  
+
+I started with a full model that included all the variables from our training model, the variables that we identified as potentially significant during the test of our training model, and our interaction variable.
+
+```{r}
+combo_full=lm(log(price)~Year.Built+Year.Remod.Add+log(area)+Bedroom.AbvGr+log(Lot.Area)+Overall.Qual+Kitchen.Qual+Central.Air+Total.Baths+Fireplaces+Garage.Cars+Wood.Deck.SF+Open.Porch.SF+Beds.Area, data=ames_combo)
+summary(combo_full)
+```
+
+It would appear that the inclusion of the additional variables identified during the test phase improved our model, as the adjusted r squared is now 0.8834, and all included variables are statistically significant. Next I carried out AIC model selection.
+
+```{r}
+combo_AIC=stepAIC(combo_full, direction = "backward", k = 2, trace = TRUE)
+summary(combo_AIC)
+```
+
+AIC did not eliminate any predictors.  Next I tried BIC.
+
+```{r}
+combo_BIC=stepAIC(combo_full, direction = "backward", k = log(1674), trace = TRUE)
+summary(combo_BIC)
+```
+
+BIC eliminated porch square footage and left us with an adjusted r-squared of 0.8831, which is still very close to the adjusted r-squared of our full model, so I dropped porch square footage to help avoid overfitting.  It turned out to be good that we added in the interaction variable, deck square footage, bathrooms, fireplaces and number of cars the garage accommodates.  
+
+
+
+## Part 4 Final Model Assessment
+
+### Section 4.1 Final Model Residual
+
+
+Here is a residual plot for the combo_interact model.
+
+```{r}
+ggplot(combo_interact, aes(x=.fitted, y=.resid))+geom_point()+geom_hline(yintercept = 0, linetype= "dotted")
+```
+
+We see the same 3 low outliers as before, but there is no clear form to the residual plot so the model appears to be a good fit for the data. We see approximately equal variance for all values of predicted price.
+
+
+
+### Section 4.2 Final Model RMSE
+
+
+Let's check out the RMSE for our final model.
+
+```{r}
+predict_combo<-exp(predict(combo_interact, ames_combo))
+resid_combo<-ames_combo$price - predict_combo
+rmse_combo<-sqrt(mean(resid_combo^2))
+rmse_combo
+```
+
+Our model is working great, with an average prediction error of $24,094.15.  
+
+
+
+### Section 4.3 Final Model Evaluation
+
+
+One strength of the model is that it appears to function just about as well for low priced as high priced homes.  Also, it has a very high adjusted r squared, indicating that we were able to account for over 88% of the variability in price using the identified predictors.  A weakness of the model is that it has a lot of predictors, so it is fairly complicated and could potentially be overfitted to the data that we used.  Also, there are still a few significant outliers in the residuals, so occasionally the model meaninfully overestimates the price of a home.
+
+
+
+### Section 4.4 Final Model Validation
+
+We will now testing the final model on a separate, validation data set to determine how the model will perform in real-life practice. 
+
+```{r loadvalidation, message = FALSE}
+load("ames_validation.Rdata")
+```
+
+
+In order to use our model on the validation data we will need to create a total baths variable in that data set and clean up any NA's in the garage cars variable.
+
+```{r}
+ames_validation<-ames_validation%>%mutate(Total.Baths=ames_validation$Full.Bath+.5*ames_validation$Half.Bath)
+ames_validation$Garage.Cars[which(is.na(ames_validation$Garage.Cars))]<-0
+```
+
+We will also need to create our interaction variable.
+
+```{r}
+ames_validation<-ames_validation%>%mutate(BedsC=ames_validation$Bedroom.AbvGr - mean(ames_validation$Bedroom.AbvGr), areaC=ames_validation$area-mean(ames_validation$area)) 
+```
+
+Next we'll multiply the centered variables for bedrooms and area.
+
+```{r}
+ames_validation<-ames_validation%>%mutate(Beds.Area=ames_validation$BedsC * ames_validation$areaC)
+```
+
+Now we will see how our final model does when applied to the out-of-sample validation data.  We will assess this first using average prediction error.
+
+```{r model_validate}
+predict_val<-exp(predict(combo_interact, ames_validation))
+resid_val<-ames_validation$price - predict_val
+rmse_val<-sqrt(mean(resid_val^2))
+rmse_val
+```
+
+The average prediction error for the validation data is just $21,821.52, which is lower than the RMSE we achieved with the training, testing and combined data.  Perhaps this data set doesn't have homes as unusual as our three outliers from the training data.
+
+Next we'll check to see what percent of the 95% predictive confidence intervals contain the true price of the house in the validation data set.
+
+```{r}
+predict.full <- exp(predict(combo_interact, ames_validation, interval = "prediction"))
+coverage.prob.full <- mean(ames_validation$price > predict.full[,"lwr"] &
+                            ames_validation$price < predict.full[,"upr"])
+coverage.prob.full
+
+```
+
+95.67% of the confidence intervals calculated using my final model capture the true price of the home in the validation data set, so my model is slightly out-performing the expressed uncertainty.  It's better to be out-performing than under-performing, so this is good.
+
+
+
+## Part 5 Conclusion
+
+Overall, we have developed a model that estimates the price of a house with an average error of about $24,000, and is able to account for about 88% of the variability in price.  95% Confidence intervals for home price generated by our model capture the actual price of out-of-sample homes just over 95% of the time.  We therefore recommend this model to the investment firm for use in selecting properties to purchase.  It might be off on individual properties from time to time, but in the long run it is highly reliable.

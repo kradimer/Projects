@@ -1,0 +1,237 @@
+---
+title: "Modeling and Prediction for Movies"
+author: "Kelly Radimer"
+output:
+  pdf_document: default
+  html_document:
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(GGally)
+```
+
+### Load data
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+
+* * *
+
+## Part 1: Data
+
+The 651 movies in the data set were selected randomly, so our inferences should be extended to all movies in the population (movies released before 2016).  There was no random assignment, so it is not appropriate to assume that there is a causal relationship between any of the variables observed.
+
+* * *
+
+## Part 2: Research question
+
+Since the audience's enjoyment of a movie is an important indicator of its success, our goal will be to create a model that predicts, as accurately as possible, the audience score on Rotten Tomatoes.  We will consider only factors that come into play prior to the release of the movie, since we are trying to create a model that we can use to create movies that audiences will like.  Specifically, we will analyze the predictive significance of type of movie, genre, runtime, mpaa rating, month of release, whether the director had won a best director Oscar, and whether one of the actors or actresses was a Best Actor/Actress winner.  We need not consider production studio, since this project is being done for Paramount Pictures.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+Let's start by cleaning up the data.  There are blanks in the runtime data that we should eliminate, since all movies have a run time and this must be an error.
+
+```{r}
+movies <- movies %>% 
+  filter(!is.na(runtime))
+```
+
+Now let's have a look at the relationship between our quantitative predictors and audience scores.
+
+```{r}
+ggpairs(movies, columns = c(4,8,18))
+summary(movies$runtime)
+summary(movies$audience_score)
+```
+
+We can see that the correlation is weak and positive between audience scores and run time (0.181).  The correlation between audience scores and release month is almost nonexistent, suggesting that a viewer's feelings about a movie have little to do with the time of year that the movie came out.  
+
+We can see from the density curves that release month is nearly uniformly distributed with a peak in the middle (likely representing the summer months) and another peak near the end of the year (the Thanksgiving/Christmas time period) when more movies than usual are released.
+
+Run times are right skewed with a small IQR. The middle 50% of movies last between 92 and 115 minutes.  There are a handful of high outliers, with a maximum at 267 minutes.
+
+Audience scores are left skewed with a median of 65, a minimum of 11 and a maximum of 97.  The IQR is 34.
+
+Now let's have a look at our categorical variables' relationship with audience scores.
+
+```{r}
+movies %>% 
+  group_by(title_type) %>% 
+  summarise(mean=mean(audience_score))
+```
+
+We can see that the mean audience score is highest for Documentaries, followed by Feature Films, with the lowest scores, on average, given to TV Movies.
+
+```{r message=FALSE, warning=FALSE}
+audscorebyrating <- movies %>%
+  group_by(mpaa_rating)%>%
+  summarise(mean=mean(audience_score)) %>%
+  arrange(desc(mean))
+
+audscorebyrating
+
+ggplot(data = audscorebyrating, aes(x=mpaa_rating, y=mean))+geom_col(fill="coral")
+```
+
+Unrated movies have the highest average rating, followed by G movies, NC-17 movies, and then R movies.  The lowest average ratings are for PG-13 movies.
+
+```{r}
+movies%>%
+  group_by(best_actor_win)%>%
+  summarise(mean=mean(audience_score))
+```
+
+Mean ratings for films with a Best Actor Award Winner are about one point higher than those without.
+
+```{r}
+movies%>%
+  group_by(best_actress_win)%>%
+  summarise(mean=mean(audience_score))
+```
+
+Mean ratings for films with a Best Actress Award Winner are about 1.7 points higher than those without.
+
+```{r}
+movies%>%
+  group_by(genre)%>%
+  summarise(mean=mean(audience_score)) %>%
+  arrange(desc(mean))
+```
+
+The genre with the highest average rating is Documentary, followed closely by Musical and Performing Arts.  The lowest average ratings go to Horror movies, followed by Sci-Fi/Fantasy and Comedies.
+
+```{r}
+movies%>%
+  group_by(best_dir_win)%>%
+  summarise(mean=mean(audience_score))
+```
+
+Movies directed by Oscar winning directors get rated about 7.7 points higher on average than movies directed by people who haven't won Best Director.
+
+
+* * *
+
+## Part 4: Modeling
+
+We will begin with a model that takes into account all 8 of our predictors of interest.
+
+```{r}
+full_model<-lm(audience_score ~ title_type + genre + runtime + mpaa_rating + thtr_rel_month + best_actor_win + best_actress_win + best_dir_win, data = movies)
+summary(full_model)
+```
+
+We will use a backward elimination p-value method to arrive at our parsimonious model. I chose this method because, with so many predictors under consideration, the adjusted R squared methods would be unwieldy.  
+
+It would appear that whether or not a movie features a woman who has won best actress has the greatest p-value, so we will eliminate that variable first.
+
+```{r}
+m1<-lm(audience_score~title_type+genre+runtime+mpaa_rating+thtr_rel_month+best_actor_win+best_dir_win, data=movies)
+summary(m1)
+```
+
+Next we will eliminate theatrical release month. (Even though genre Comedy has a higher p-value, some of the genres are still statistically significant, so we cannot eliminate that predictor.)
+
+```{r}
+m2<-lm(audience_score~title_type+genre+runtime+mpaa_rating+best_actor_win+best_dir_win, data=movies)
+summary(m2)
+```
+
+Best actor winner has the highest of the remaining p-values, so we'll eliminate that one.
+
+```{r}
+m3<-lm(audience_score~title_type+genre+runtime+mpaa_rating+best_dir_win, data=movies)
+summary(m3)
+```
+
+At this point, at least one level of all of our remaining variables (title type, genre, runtime, mpaa rating and best director win) is statistically significant, so this will be our final model.
+
+All other variables being equal we find that:
+
+1. Having a director who has won an academy award yields an audience rating that is 6 points higher on average than a non-academy award winning director.
+
+2. Documentaries tend to score 21 points higher than TV movies and 11.8 points higher than feature films.
+
+3. The genre with the highest audience score is Musical & Performing Arts, which sees a boost of 19.8 points above baseline.  The genre with the most negative impact on average audience score is horror, which is 6.8 points below baseline.
+
+4. Longer movies tend to get higher audience ratings than shorter movies, with every additional minute increasing the predicted audience score by 0.17 on average.
+
+5. G-rated movies tend to get the highest audience ratings, with unrated movies trailing an average of 6 points behind, followed by PG, R and NC-17 movies, which all tend to be rated around 10 points lower than G movies.  The lowest ratings are given to PG-13 movies, about 15.6 points lower than G.
+
+Adjusted R-squared = 0.2264, so 22.64% of the variability in audience ratings are accounted for by our regression model.
+
+###Diagnostics for MLR
+
+Now let's check model diagnostics for the predictors that remain.  
+First, we must check that each numerical predictor has a linear relationship with y.  The only remaining numerical predictor is runtime.  We saw in our EDA that the scatterplot of audience score vs. runtime has a low correlation and no obvious departures from linearity.  Let's also look at a residual plot of residuals vs. runtime in order to take other predictors into account.
+
+```{r}
+plot(m3$residuals~movies$runtime)
+```
+
+The residual plot shows no clear form, so we should be all set for this condition.
+
+Next, we want to check the normality of our residuals.
+
+
+```{r}
+hist(m3$residuals)
+qqnorm(m3$residuals)
+qqline(m3$residuals)
+```
+
+The histogram and Normal Quantile Plot of the residuals both show a slight left skew in the residuals, but neither shows an alarming departure from Normality.
+
+Next we want to check the constant variability of the residuals.  We will check this by making a plot of residuals vs. predicted audience score, so that all predictors are considered.
+
+```{r}
+plot(m3$residuals~m3$fitted, xlab="Predicted Audience Score", ylab="Residual")
+```
+
+We have approximately equal variability in residuals when predicted audience scores are between 45 and 75.  There were far fewer cases for which the predicted score was above 75, so it is hard to say whether the variability for those predictions would be equal to that of the lower predictions.  
+
+
+* * *
+
+## Part 5: Prediction
+I have selected the movie Whiskey Tango Foxtrot (2016) to use for my prediction.  The actual audience score for the movie is 55 according to https://www.rottentomatoes.com/m/whiskey_tango_foxtrot.  Also on Rotten Tomatoes we find that it is a feature film, genre is comedy, rating is R and Runtime is 111 minutes.  It has two directors, Glenn Ficarra and John Requa, neither of whom has won an Oscar for best director, according to IMDB.
+http://www.imdb.com/name/nm0720135/awards?ref_=m_nm_awd&mode=desktop
+http://www.imdb.com/name/nm0275629/awards?ref_=nm_ql_2
+
+```{r}
+WTF<-data.frame(genre="Comedy", mpaa_rating="R", runtime=111, best_dir_win="no", title_type="Feature Film")
+predict(m3, WTF)
+```
+
+Predicted audience score differed from actual audience score by just 1.179, which is surprisingly close, considering that the standard error of the residuals is 17.8.
+
+```{r}
+predict(m3, WTF, interval = "prediction", level=0.95)
+```
+
+We are, therefore, 95% confident that the true audience score for this movie will be between 20.952 and 91.406.
+The large standard error of the residuals results in a very wide margin, which easily captures the true value of audience score.
+
+
+* * *
+
+## Part 6: Conclusion
+
+Bearing in mind that the following traits cannot be said to cause a higher audience rating, our analysis suggests that the following qualities are associated with higher audience ratings: documentary, musical, rated G, Oscar-winning director, longer runtime.
+
+It is important to note that better audience scores of a movie do not guarantee that a movie will be more financially successful.  It would be useful to have information about the amount that these movies cost and the amount that they made in the box office and through follow-up sales and licensing to provide better advice about the types of projects you should pursue in the future to maximize financial success.
+
+

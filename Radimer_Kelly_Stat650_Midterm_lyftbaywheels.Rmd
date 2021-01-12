@@ -1,0 +1,355 @@
+---
+title: "Stat650 Midterm: Lyft Baywheels Data"
+author: Kelly Radimer, Section 2
+output:
+  pdf_document: default
+---
+
+
+### Download, Unzip and Read the Data into R
+
+```{r}
+library(pacman)
+p_load(tidyverse,tictoc,ggmap,skimr,lubridate,forcats, Amelia)
+
+```
+
+
+First, we will download the files into the data directory by looping over the one value in the url and filename that changes.
+
+```{r, eval=FALSE}
+
+for (i in 5:9) {
+URL <- paste0("https://s3.amazonaws.com/baywheels-data/20190",i,"-baywheels-tripdata.csv.zip")
+download.file(URL, destfile = paste0("C:/Users/snapd/Documents/R/STAT 650/Midterm/data/20190",i,"-baywheels-data.csv.zip"), method="curl")
+}
+
+for (i in 0:2) {
+URL <- paste0("https://s3.amazonaws.com/baywheels-data/20191",i,"-baywheels-tripdata.csv.zip")
+download.file(URL, destfile = paste0("C:/Users/snapd/Documents/R/STAT 650/Midterm/data/20191",i,"-baywheels-data.csv.zip"), method="curl")
+}
+
+for (i in 1:8) {
+URL <- paste0("https://s3.amazonaws.com/baywheels-data/20200",i,"-baywheels-tripdata.csv.zip")
+download.file(URL, destfile = paste0("C:/Users/snapd/Documents/R/STAT 650/Midterm/data/20200",i,"-baywheels-data.csv.zip"), method="curl")
+}
+```
+
+
+
+Next we will unzip downloaded files, again with a for loop.
+
+```{r eval=FALSE}
+
+for (i in 5:9) {
+fn<-paste0("./data/20190",i,"-baywheels-data.csv.zip")
+ unzip(fn, exdir = "./data")
+}
+
+for (i in 0:2) {
+fn<-paste0("./data/20191",i,"-baywheels-data.csv.zip")
+ unzip(fn, exdir = "./data")
+}
+
+for (i in 1:8) {
+fn<-paste0("./data/20200",i,"-baywheels-data.csv.zip")
+ unzip(fn, exdir = "./data")
+}
+
+```
+
+Next, we clean up data directory.
+
+```{r eval=FALSE}
+
+for (i in 5:9) {
+fn<-paste0("./data/20190",i,"-baywheels-data.csv.zip")
+ if (file.exists(fn)) file.remove(fn)
+}
+
+for (i in 0:2) {
+fn<-paste0("./data/20191",i,"-baywheels-data.csv.zip")
+ if (file.exists(fn)) file.remove(fn)
+}
+
+for (i in 1:8) {
+fn<-paste0("./data/20200",i,"-baywheels-data.csv.zip")
+ if (file.exists(fn)) file.remove(fn)
+}
+
+```
+
+Read the .csv files into data frames.
+
+```{r message=FALSE, warning=FALSE}
+for (i in 5:9) {
+  fn <- paste0("./data/20190",i,"-baywheels-tripdata.csv")
+  nam <- paste("baywheels20190", i, sep = "")
+  assign(nam, read_csv(file = fn))
+}
+
+for (i in 0:2) {
+  fn <- paste0("./data/20191",i,"-baywheels-tripdata.csv")
+  nam <- paste("baywheels20191", i, sep = "")
+  assign(nam, read_csv(file = fn))
+}
+
+for (i in 1:8) {
+  fn <- paste0("./data/20200",i,"-baywheels-tripdata.csv")
+  nam <- paste("baywheels20200", i, sep = "")
+  assign(nam, read_csv(file = fn))
+}
+
+```
+
+Check the head() and tail() of a couple of the data.frames to make sure they look as we expect. We'll check an older month and a newer month to see if the variables match up.
+
+
+```{r}
+head(baywheels202008)
+
+```
+
+
+
+```{r}
+tail(baywheels201905)
+```
+
+The variables do not match. Also, the number of variables in my data frames ranges from 13 to 15.  Let's figure out why.
+
+```{r}
+col2008 <- colnames(baywheels202008)
+col1911 <- colnames(baywheels201911)
+intersect(col2008, col1911)
+```
+
+Only four variables match between these two data frames, so it looks like they've renamed several variables in addition to dropping and adding some variables.
+
+Old variable names:
+```{r}
+col1911
+```
+
+New variable names:
+```{r}
+col2008
+```
+
+It looks like the new system no longer uses the variables duration_sec, bike_share_for_all_trip, rental_access_method and bike_id, so we should remove these variables. 
+
+Variables start_time and end_time should change to started_at and ended_at, start_station_latitude should become start_lat (likewise for end and longitude). 
+
+The number of variables fluctuates from month to month, so let's have a look at some more variable names in order to find the cause for these fluctuations and determine when they made the big switch.
+
+```{r}
+col1905<-colnames(baywheels201905)
+col1906<-colnames(baywheels201906)
+intersect(col1906,col1911)
+```
+
+June and November 2019 match in all variables.
+
+```{r}
+intersect(col1905,col1906)
+```
+
+May is just missing rental_access_method relative to June 2019.
+
+```{r}
+col1910<-colnames(baywheels201910)
+intersect(col1905,col1910)
+```
+
+May and October 2019 match.  
+
+```{r}
+col2003 <- colnames(baywheels202003)
+col2004 <- colnames(baywheels202004)
+intersect(col2003,col2004)
+```
+
+It looks like the change happened in April 2020, so let's bind together all the data frames before that change and then modify the variables.
+
+```{r}
+old_var<-bind_rows(baywheels201905,baywheels201906,baywheels201907, baywheels201908,baywheels201909,baywheels201910,baywheels201911, baywheels201912, baywheels202001, baywheels202002, baywheels202003)
+```
+
+
+```{r}
+old_var <- old_var %>% select(-duration_sec) %>%
+  rename(started_at = start_time, 
+         ended_at = end_time,
+         start_lat = start_station_latitude,
+         start_lng = start_station_longitude,
+         end_lat = end_station_latitude,
+         end_lng = end_station_longitude
+         ) 
+
+```
+
+The Baywheels website says User Type (Subscriber or Customer – “Subscriber” = Member or “Customer” = Casual), so we can rename these in the old data set, while getting rid of a few more variables that are no longer used.
+
+```{r}
+old_var <- old_var %>%
+  select(-bike_share_for_all_trip, -rental_access_method, -bike_id) %>%
+  mutate(member_casual = ifelse(user_type=="Customer", "casual", "member"))
+```
+
+```{r}
+old_var <- old_var %>%
+  select(-user_type)
+```
+
+Now we can merge the old and new data.
+
+```{r}
+lyft <- bind_rows(old_var, baywheels202004, baywheels202005, baywheels202006, baywheels202007, baywheels202008)
+glimpse(lyft)
+```
+
+
+### Questions to Answer
+
+*1. Explain what the GBFS is.*
+
+GBFS stands for General Bikeshare Feed Specification. It tells what variables are optional and required for data that bikeshare companies upload into the feed, what type they should be, etc. It has been adopted by hundreds of bikeshare companies worldwide to share real-time read-only data. Per https://nabsa.net/resources/gbfs/, it is intended to:
+
+* Provide the status of the system at this moment
+* Do not provide information whose primary purpose is historical
+* The data in the specification is intended for consumption by clients intending to provide real-time (or semi-real-time) transit advice and is designed as such.
+
+
+*2. Explain any difficulties you encountered getting the code to work.*
+
+I initially made a typo in the URL for the lyftbaywheels data site, so it seemed at first to be working, it made a bunch of .zip files that were named what I expected them to be named, but then when I tried to unzip them I encountered an error.  I tried manually opening the files and discovered that they were empty. When I fixed the URL, the code worked.
+
+
+*3. The analysis is to work with the data since Lyft BayWheels started, start with the data since May 2019. Modify the code to download the data to be analyzed. How many bike rentals were there before the COVID-19 lockdown in CA? How many bike rentals were there after the lockdown? How many bike rentals have there been since the beginning of Lyft BayWheels?*
+
+The Bay Area lockdown began March 17, 2020, so for pre-lockdown bike rentals we will include May 2019-March 16, 2020:
+
+```{r}
+lyft %>%
+  filter(started_at < as.Date("2020-03-17 00:00:00")) %>%
+  summarise(n=n())
+```
+
+Pre-lockdown, there was a total of 2,504,999 rides.
+
+```{r}
+lyft %>%
+  filter(started_at >= as.Date("2020-03-17 00:00:00")) %>%
+  summarise(n=n())
+```
+
+Post-lockdown, there were a total of 724178 rides.
+
+Adding these together will give us the total number of rides since the beginning of Lyft Baywheels.
+
+```{r}
+724178+2504999
+```
+
+
+All together there have been 3229177 rentals since the beginning of Lyft Baywheels. This is good because it matches the number of rows in our lyft data frame.
+
+
+
+*4. There is a part of the code that uses the as.integer() function for some reason. Explain what this function is being used for in the code.*
+
+It's changing the variable type of the station id's to integer. The FordGoBike station id's were not all stored as integer type, which presented a problem when trying to merge the months together.  This wasn't a problem for the Lyft data, as all the station ids were all already integers.
+
+
+
+*5. In 2020, what month had the highest number of riders? What month had the lowest number of riders? Interpret any seasonal patterns.*
+
+```{r}
+twentytwenty <- tibble(month = c(1,2,3,4,5,6,7,8), 
+                       rides = c(dim(baywheels202001)[1], dim(baywheels202002)[1], dim(baywheels202003)[1], dim(baywheels202004)[1], dim(baywheels202005)[1], dim(baywheels202006)[1], dim(baywheels202007)[1], dim(baywheels202008)[1]))
+twentytwenty
+```
+
+```{r}
+ggplot(twentytwenty, aes(month, rides)) +
+  geom_line()+
+  ggtitle("Baywheels Rides in 2020") 
+```
+
+
+In 2020, February had the highest number of riders. April had the lowest number of riders.  This makes it appear that more people rent bikes in the winter than in the sping and summer, but I don't think this would be typical in a non-pandemic world.  Another confounding factor is that Lyft changed their membership and pricing structure, raising rates and allowing less rental return flexibility, on March 2, so part of the decline in membership and rentals might also be caused by this price increase.
+
+
+*6. What start station had the highest number of rides? That is, which start station was used most to start rides?*
+
+```{r message=FALSE, warning=FALSE}
+lyft %>% select(start_station_id,start_station_name) %>%
+  group_by(start_station_id) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n))
+```
+
+```{r}
+lyft %>% select(start_station_id, start_station_name) %>%
+  filter(start_station_id == 58) %>%
+  distinct()
+```
+
+The station with the most rides was Market St at 10th St, which had 41,721 rides.
+
+
+
+*7. Using the Amelia R package and the missmap() function determine the rate of missing data in the month of June 2020. Or try the visdat package and the vis_miss() function. Or check out the the naniar R package. (This might not work on your computer if you have too little RAM.) If you cannot get your code to run, sample the data first.*
+
+```{r message=FALSE, warning=FALSE}
+missmap(baywheels202006)
+```
+
+June 2020 is missing 12% of its data. The variables most commonly missing are start and end station names and ids.  
+
+
+*8. What Type of rider uses the Lyft BayWheels more? Subscribers or Customers?*
+
+```{r}
+lyft %>%
+  group_by(member_casual) %>%
+  summarise(n=n())
+```
+
+Overall, since its inception, members have used Lyft Baywheels more than non-members, making up 2089512/3229177 of rides, or:
+
+```{r}
+2089512/3229177
+```
+
+64.7% of rides were taken by members.
+
+Because of the change in subscription policy on March 2, 2020, I think it would be interesting to look at the prevalence of subscribers before and after this change. We will first find out what percent of rides were taken by members before the policy change:
+
+```{r}
+lyft %>%
+  filter(started_at < as.Date("2020-03-02 00:00:00")) %>%
+  group_by(member_casual) %>%
+  summarise(n=n())
+```
+
+
+
+```{r}
+1720968/(1720968+652942)
+```
+
+Next, we will see what percent of rides were taken by members after the policy change.
+
+```{r}
+lyft %>%
+  filter(started_at >= as.Date("2020-03-02 00:00:00")) %>%
+  group_by(member_casual) %>%
+  summarise(n=n())
+```
+
+```{r}
+368544/(368544+486723)
+```
+
+Before the price change, 72.5% of the rides were taken by members, whereas after the price change, only 43.1% were taken by members, so it seems that the price change did coincide with a drastic reduction in the percentage of rides taken by members, which may or may not be causal.

@@ -1,0 +1,192 @@
+---
+title: "Exploring the BRFSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(stringr)
+```
+
+* * *
+```{r}
+load("brfss2013.RData")
+```
+
+## Part 1: Data
+The Behavioral Risk Factor Surveillance System (BRFSS) data were collected through a random sample of cell-phone and landline households in the United States.  All participants were over 18 and non-institutionalized.  Because a random sample was taken, it is appropriate to generalize the results to all non-institutionalized adults in the United States.  Because this was an observational study and not an experiment, it would not be appropriate to infer a causal relationship between the variables. There was no random assignment of treatments.
+
+* * *
+
+## Part 2: Research questions
+
+**Research quesion 1:**
+Do adults with fewer "hours of sleep"" have a higher number of "days of mental health not good"?
+
+This question is of interest to me because sleep deprivation during the infancy of my children seemed to have a negative impact on my mental health.
+
+**Research quesion 2:**
+Among those who selected yes for "Smoked at least 100 cigarettes", are larger values of "interval since last smoked" associated with lower values of "number of days physical health not good"?
+
+This question is of interest to me because I am wondering how soon people tend to see physical health benefits after quitting smoking.
+
+**Research quesion 3:**
+Is there an association between "number of children in household" and "education level"?  Does "marital status" make a difference in whether an association is observed between these variables?
+
+The movie "Idiocracy" suggested that people with lower levels of education tend to have more children than those with higher levels of education and I wonder if this portrayal is accurate.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+**Research quesion 1:**
+First, let's have a look at a numerical summary of our 2 variables of interest, sleptim1, the number of hours of sleep the subject had in the last 24 hours, and menthlth, the number of days of bad mental health within the last 30 days.
+```{r}
+summary(brfss2013$sleptim1)
+summary(brfss2013$menthlth)
+```
+There are some blanks in both sets of data that we should filter out, along with impossible values such as sleep times over 24 hours and days of bad mental health over 30. I will create a new data set with the cleaned sleep and mental health data called filteredbrfss.
+```{r}
+filteredbrfss<-brfss2013%>%select(sleptim1,menthlth)%>%filter(!is.na(sleptim1), !is.na(menthlth), menthlth<31, sleptim1<25)
+```
+
+Let's have a look at the new summary statistics.
+
+```{r}
+summary(filteredbrfss$sleptim1)
+summary(filteredbrfss$menthlth)
+```
+
+Now all of the remaining values are relevant and possible. More then half of survey participants reported 0 days of bad mental health in the last 30 days. Half reported less than 7 hours of sleep, half more than 7 hours of sleep.
+
+Now we can use that new data set to create histogtrams of the sleep and mental health data and a scatterplot of the combined data.
+```{r}
+ggplot(data=filteredbrfss, aes(x=sleptim1))+geom_histogram(color="black",fill="aquamarine")
+```
+```{r}
+ggplot(data=filteredbrfss, aes(x=menthlth))+geom_histogram(color="black", fill="yellow")
+```
+
+Sleep times are approximately symmetrical and unimodal.  Number of days mental health bad is unimodal and strongly right skewed. 
+
+
+
+```{r}
+ggplot(data=filteredbrfss, aes(x=sleptim1, y=menthlth))+geom_point()
+```
+
+A scatterplot of the data shows no clear association between these two variables.
+
+
+**Research quesion 2:**
+First, let's have a look at the structure of our 3 variables of interest.
+
+```{r}
+str(brfss2013$smoke100)
+str(brfss2013$lastsmk2)
+str(brfss2013$physhlth)
+```
+
+Our first variable asks whether people have smoked at least 100 cigarettes in their life.  1 = yes, 2 = no, and NA = refused, don't know or no data. 
+
+Our second variable asks how long it has been since the subject last smoked.  1 = Within the past month, 2= Within the past 3 months, 3=Within the past 6 months, 4 = Within the past year, 5 = Within the past 5 years, 6 = Within the past 10 years, 7 = over 10 years, 8 = never smoked, NA = refused, missing, not sure.
+
+Our third variable asks how many of the last 30 days the subject's physical health was not good with values ranging from 1 to 30 and NA for not sure, refused and missing.
+
+We are only looking at those who have smoked at least 100 cigarettes, so let's filter the data set down to those individuals.  Let's also get rid of any blanks in the time since last cigarette and days physical health not good data. 
+
+```{r}
+brfss2013smokers<-brfss2013%>%select(smoke100, physhlth, lastsmk2)%>%filter(!is.na(smoke100)) %>% filter(!is.na(physhlth))%>% filter(!is.na(lastsmk2)) 
+```
+
+Now let's have a look at the distribution of days of physical health not good among people who have, at some point, been smokers.
+
+
+```{r}
+ggplot(data=brfss2013smokers, aes(x=physhlth))+geom_histogram()
+```
+
+```{r}
+brfss2013smokers%>%summarise(mean_bad_health=mean(physhlth), median_bad_health=median(physhlth))
+```
+
+The distribution is strongly right skewed, with a mode at either extreme, so it would appear that the majority of people had 0 days of physical health not good, with a reasonably large contingent of people having all 30 of their last 30 days of physical health not good.  The mean number of bad health days is approximately 5, the median is 0.
+
+Now let's see how the mean and median number of days of physical health not good compares between the different levels of time since last cigarette.
+
+
+```{r}
+brfss2013smokers%>%group_by(lastsmk2)%>%summarise(count = n(), mean_badhlth = mean(physhlth), median_badhlth = median(physhlth))
+```
+
+Eureka!  The mean number of days of bad physical health grows steadily smaller, the longer it has been since the person smoked.
+
+```{r}
+mean_badhlth<-brfss2013smokers%>%group_by(lastsmk2)%>%summarise(mean_badhlth = mean(physhlth))
+ggplot(data=mean_badhlth, aes(x=lastsmk2, y=mean_badhlth))+geom_col(fill="coral")+theme(axis.text.x=element_text(angle=90, margin=margin(.15,unit="cm")))+xlab("Interval Since Last Smoked")+ylab("Mean Days Bad Health")
+```
+
+The mean for last cigarette within 1 year is slightly higher than the mean for last cigarette within 6 months, but otherwise, the longer the interval since the last cigarette, the lower the mean number of days of physical health not good.
+
+
+
+**Research quesion 3:**
+First, let's have a look at the structure of our 3 variables of interest.
+
+```{r}
+str(brfss2013$children)
+str(brfss2013$educa)
+str(brfss2013$marital)
+```
+
+Let's filter out the NA's in all three groups.
+
+```{r}
+cleanbrfss<-brfss2013%>%filter(!is.na(children))%>%filter(!is.na(educa))  %>%filter(!is.na(marital))
+```
+Now let's see if higher levels of education are correlated with fewer children in the household, on average.
+
+```{r}
+cleanbrfss%>%group_by(educa)%>%summarise(mean_kids = mean(children))
+```
+It is true that the highest mean number of kids per household occurs among those with no formal education/only kindergarten, but the lowest mean is actually among those with GED or high school diploma, followed by 1 to 3 years of college.  Mean number of children for all individuals who have had some education are all fairly similar.
+
+Let's compare those who have never been married or are member of an unmarried couple to those who are married, divorced, widowed or separated.
+
+```{r}
+marriedbrfss<-cleanbrfss%>%filter(marital == "Married"|marital=="Divorced"|marital == "Separated"|marital == "Widowed")
+unmarriedbrfss<-cleanbrfss%>%filter(marital=="Never married"|marital == "A member of an unmarried couple")
+marriedbrfss%>%group_by(educa)%>%summarise(mean_kids = mean(children))
+```
+
+
+```{r}
+unmarriedbrfss%>%group_by(educa)%>%summarise(mean_kids = mean(children))
+```
+
+Among individuals who have at some point been married, the mean number of children of adults with no education is markedly higher than the mean number of children for adults with no education who have at some point been married.  College graduates who have at some point been married have a much higher mean number of children than college graduates who have never been married.  We see among unmarried individuals the consistent downward trend of higher levels of education being associated with fewer children.
+
+```{r}
+meankidsunmarried<-unmarriedbrfss%>%group_by(educa)%>%summarise(mean_kids = mean(children))
+meankidsmarried<-marriedbrfss%>%group_by(educa)%>%summarise(mean_kids = mean(children))
+ggplot(data=meankidsmarried, aes(x=educa, y=mean_kids))+geom_col(fill="yellow")+scale_x_discrete(labels=function(x) str_wrap(x, width = 8))+xlab("Highest Level of Education Obtained")+ylab("Mean Number of Children")
+```
+
+Note how the graph of mean kids among people who have been married is highest at the highest and lowest levels of education with no clear trend.
+
+```{r}
+ggplot(data=meankidsunmarried, aes(x=educa, y=mean_kids))+geom_col(fill="green")+scale_x_discrete(labels=function(x) str_wrap(x, width = 9))+xlab("Highest Level of Education Obtained")+ylab("Mean Number of Children")
+```
+
+
+Note how the graph of mean kids among people who have never been married is has a clear trend of higher levels of education being associated with fewer children.
+
